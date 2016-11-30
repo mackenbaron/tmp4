@@ -134,7 +134,6 @@ int mp4Writer::init()
 	}
 	ofmt = ofmt_ctx->oformat;
 
-
 	for (int i = 0; i < ifmt_ctx_v->nb_streams; i++) {
 		//Create output AVStream according to input AVStream
 		if (ifmt_ctx_v->streams[i]->codec->codec_type == AVMEDIA_TYPE_VIDEO){
@@ -370,7 +369,7 @@ int mp4Writer::writeMp4(Config &cfg)
 		//Write
 		if (av_interleaved_write_frame(ofmt_ctx, &pkt) < 0) {
 			printf("Error muxing packet\n");
-			break;
+			//break;
 		}
 
 		av_free_packet(&pkt);
@@ -525,7 +524,6 @@ int mp4Writer::nal_parser_sub(unsigned char *pNal, nal_s &node)
 
 int mp4Writer::nal_parser(AVPacket *org)
 {
-
 	if (org->data == NULL || org->size <= 0)
 		return 0;
 
