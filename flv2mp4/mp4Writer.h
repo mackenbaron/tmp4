@@ -2,7 +2,7 @@
 #include<stdio.h>
 extern "C"
 {
-#include "libavformat\avformat.h"
+#include "libavformat/avformat.h"
 };
 
 #include <string>

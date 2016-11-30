@@ -65,7 +65,7 @@ int mp4Writer::init()
 #endif
 
 	av_register_all();
-	fopen_s(&fp_open_v, in_filename_v.c_str(), "rb");
+	fp_open_v = fopen(in_filename_v.c_str(), "rb");
 	if (fp_open_v == NULL)
 	{
 
@@ -75,7 +75,7 @@ int mp4Writer::init()
 	AVIOContext *avio_v = avio_alloc_context(iobuffer_v, IO_BUFFER_SIZE, 0, NULL, fill_iobuffer_v, NULL, NULL);
 	ifmt_ctx_v->pb = avio_v;
 
-	fopen_s(&fp_open_a, in_filename_a.c_str(), "rb");
+	fp_open_a = fopen(in_filename_a.c_str(), "rb");
 	if (fp_open_a == NULL)
 	{
 
@@ -496,7 +496,7 @@ int mp4Writer::nal_parser_sub(unsigned char *pNal, nal_s &node)
 	}
 
 	// ∏¥÷∆µΩnode÷–
-	auto iter = lSons.begin();
+	std::list<nal_s>::iterator iter = lSons.begin();
 	for (; iter != lSons.end(); iter++){
 		vSons.push_back(*iter);
 	}
