@@ -32,11 +32,36 @@ typedef struct nal_s{
 	int pos;
 	int size;
 	std::vector<nal_s> vecSons;
-}nalu_s,pktu_s;
+}nalu_s, pktu_s;
 
 #define USE_H264BSF 0
 #define USE_AACBSF 0
 #define IO_BUFFER_SIZE 32768  
+
+enum error_no_e{
+	ErrorNo_OK = 0,
+	ErrorNo_FileOpenFail,
+	ErrorNo_NoAudio,
+	ErrorNo_NoVideo,
+	ErrorNo_NoVideoOrAudio,
+	ErrorNo_Unknow
+};
+
+typedef struct InputCfg_S{
+	std::string filename;
+	//FILE *pFile;
+	AVFormatContext *ifmt_ctx;
+	AVInputFormat *ifmt;
+	int index;
+}InputCfg_S;
+
+typedef struct OutputCfg_S{
+	std::string filename;
+	AVFormatContext *ofmt_ctx;
+	AVOutputFormat *ofmt;
+	int indexVideo;
+	int indexAudio;
+}OutputCfg_S;
 
 class mp4Writer
 {
@@ -48,6 +73,10 @@ public:
 
 private:
 	int init();
+	int open_input_file(InputCfg_S *p, FILE * &pFile, char *url,
+		int(*read_packet)(void *opaque, uint8_t *buf, int buf_size));
+	int open_output_file(OutputCfg_S *p, InputCfg_S *inV, InputCfg_S *inA);
+	int bind_stream(InputCfg_S *in, OutputCfg_S *out, int type, int &index);
 	int cleanup();
 	int nal_parser(AVPacket *org);
 	int nal_parser_sub(unsigned char *pNal, nal_s &node);
@@ -56,23 +85,10 @@ private:
 	int set_data_size(unsigned char *pHead, int size);
 
 private:
-	AVInputFormat *ifmt_v;
-	AVInputFormat *ifmt_a;
-	AVOutputFormat *ofmt;
-	AVFormatContext *ifmt_ctx_v;
-	AVFormatContext *ifmt_ctx_a;
-	AVFormatContext *ofmt_ctx;
 
-	int videoindex_v;
-	int videoindex_out;
-	int audioindex_a;
-	int audioindex_out;
-
-	std::string in_filename_v;
-	std::string in_filename_a;
-	std::string out_filename;
-	int bHasAudio;
+	InputCfg_S _inVideoCfg;
+	InputCfg_S _inAudioCfg;
+	OutputCfg_S _outputCfg;
 
 	unsigned char *_buffer;
 };
-

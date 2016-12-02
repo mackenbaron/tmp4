@@ -1,5 +1,6 @@
-
 #include "mp4Writer.h"
+
+#include <stdio.h>
 #include <string>
 #include <vector>
 #include <list>
@@ -9,19 +10,19 @@ FILE *fp_open_a;
 
 mp4Writer::mp4Writer()
 {
-	ifmt_v = NULL;
-	ifmt_a = NULL;
-	ofmt = NULL;
-	ifmt_ctx_v = NULL;
-	ifmt_ctx_a = NULL;
-	ofmt_ctx = NULL;
+	_inVideoCfg.ifmt = NULL;
+	_inAudioCfg.ifmt = NULL;
+	_outputCfg.ofmt = NULL;
+	_inVideoCfg.ifmt_ctx = NULL;
+	_inAudioCfg.ifmt_ctx = NULL;
+	_outputCfg.ofmt_ctx = NULL;
 
-	videoindex_v = -1;
-	videoindex_out = -1;
-	audioindex_a = -1;
-	audioindex_out = -1;
-	bHasAudio = 0;
-	_buffer = new unsigned char[1024 * 1024];
+	_inVideoCfg.index = -1;
+	_outputCfg.indexVideo = -1;
+	_inAudioCfg.index = -1;
+	_outputCfg.indexAudio = -1;
+
+	_buffer = new unsigned char[2*1024 * 1024];
 }
 
 
@@ -52,6 +53,135 @@ static int fill_iobuffer_a(void *opaque, uint8_t *buf, int buf_size)
 	}
 }
 
+int mp4Writer::open_input_file(InputCfg_S *p, FILE * &pFile, char *url,
+	int(*read_packet)(void *opaque, uint8_t *buf, int buf_size))
+{
+	int ret;
+	unsigned char *iobuffer_v;
+	AVIOContext *avio_v;
+
+	pFile = fopen(p->filename.c_str(), "rb");
+	if (pFile == NULL)
+	{
+		fprintf(stderr, "[failed] Could not open input file\n");
+		ret = ErrorNo_FileOpenFail;
+		goto end;
+	}
+	p->ifmt_ctx = avformat_alloc_context();
+	iobuffer_v = (unsigned char *)av_malloc(IO_BUFFER_SIZE);
+	avio_v = avio_alloc_context(iobuffer_v, IO_BUFFER_SIZE, 0, NULL, read_packet, NULL, NULL);
+	p->ifmt_ctx->pb = avio_v;
+
+	p->ifmt = av_find_input_format("flv");
+	if ((ret = avformat_open_input(&p->ifmt_ctx, url, p->ifmt, NULL)) < 0) {
+		fprintf(stderr, "[failed] Could not open input file\n");
+		ret = ErrorNo_FileOpenFail;
+		goto end;
+	}
+
+	if ((ret = avformat_find_stream_info(p->ifmt_ctx, 0)) < 0) {
+		fprintf(stderr, "[failed] Failed to retrieve input stream information\n");
+		ret = ErrorNo_Unknow;
+		goto end;
+	}
+
+	return 0;
+end:
+	if (pFile){
+		fclose(pFile);
+		pFile = NULL;
+	}
+	if (p->ifmt_ctx){
+		avformat_close_input(&p->ifmt_ctx);
+		p->ifmt_ctx = NULL;
+	}
+	return ret;
+}
+
+int mp4Writer::bind_stream(InputCfg_S *in, OutputCfg_S *out, int type, int &outIndex)
+{
+	int ret;
+	for (int i = 0; i < in->ifmt_ctx->nb_streams; i++) {
+		//Create output AVStream according to input AVStream
+		if (in->ifmt_ctx->streams[i]->codec->codec_type == type){
+			AVStream *in_stream = in->ifmt_ctx->streams[i];
+			AVStream *out_stream = avformat_new_stream(out->ofmt_ctx, in_stream->codec->codec);
+			in->index = i;
+			if (!out_stream) {
+				fprintf(stderr, "[failed] Failed allocating output stream\n");
+
+				ret = ErrorNo_Unknow;
+				goto end;
+			}
+			outIndex = out_stream->index;
+			//Copy the settings of AVCodecContext
+			if (avcodec_copy_context(out_stream->codec, in_stream->codec) < 0) {
+				printf("Failed to copy context from input to output stream codec context\n");
+				ret = ErrorNo_Unknow;
+				goto end;
+			}
+			out_stream->codec->codec_tag = 0;
+			if (out->ofmt_ctx->oformat->flags & AVFMT_GLOBALHEADER)
+				out_stream->codec->flags |= CODEC_FLAG_GLOBAL_HEADER;
+			break;
+		}
+	}
+
+	return 0;
+end:
+	return ret;
+}
+
+int mp4Writer::open_output_file(OutputCfg_S *p, InputCfg_S *inV, InputCfg_S *inA)
+{
+	int ret;
+
+	avformat_alloc_output_context2(&p->ofmt_ctx, NULL, NULL, p->filename.c_str());
+	if (!p->ofmt_ctx) {
+		fprintf(stderr, "[failed] Could not create output context\n");
+
+		ret = ErrorNo_Unknow;
+		goto end;
+	}
+	p->ofmt = p->ofmt_ctx->oformat;
+
+	ret = bind_stream(inV, p, AVMEDIA_TYPE_VIDEO, p->indexVideo);
+	ret |= bind_stream(inA, p, AVMEDIA_TYPE_AUDIO, p->indexAudio);
+	if (ret != 0)
+	{
+		goto end;
+	}
+
+	if (inV->index == -1 || inA->index == -1 || p->indexAudio == -1 || p->indexVideo == -1){
+		ret = ErrorNo_NoVideoOrAudio;
+		if (inV->index == -1)
+			fprintf(stderr, "[failed] no video stream\n");
+		if (inA->index == -1)
+			fprintf(stderr, "[failed] no audio stream\n");
+		goto end;
+	}
+
+	//Open output file
+	if (!(p->ofmt->flags & AVFMT_NOFILE)) {
+		if (avio_open(&p->ofmt_ctx->pb, p->filename.c_str(), AVIO_FLAG_WRITE) < 0) {
+			printf("Could not open output file '%s'", p->filename.c_str());
+			ret = ErrorNo_FileOpenFail;
+			goto end;
+		}
+	}
+
+	return 0;
+end:
+	if (p->ofmt_ctx)
+	{
+		if (p->ofmt_ctx && !(p->ofmt->flags & AVFMT_NOFILE))
+			avio_close(p->ofmt_ctx->pb);
+		avformat_free_context(p->ofmt_ctx);
+		p->ofmt_ctx = NULL;
+	}
+	return ret;
+}
+
 int mp4Writer::init()
 {
 	int ret;
@@ -65,178 +195,65 @@ int mp4Writer::init()
 #endif
 
 	av_register_all();
-	fp_open_v = fopen(in_filename_v.c_str(), "rb");
-	if (fp_open_v == NULL)
-	{
 
-	}
-	ifmt_ctx_v = avformat_alloc_context();
-	unsigned char *iobuffer_v = (unsigned char *)av_malloc(IO_BUFFER_SIZE);
-	AVIOContext *avio_v = avio_alloc_context(iobuffer_v, IO_BUFFER_SIZE, 0, NULL, fill_iobuffer_v, NULL, NULL);
-	ifmt_ctx_v->pb = avio_v;
-
-	fp_open_a = fopen(in_filename_a.c_str(), "rb");
-	if (fp_open_a == NULL)
-	{
-
-	}
-	ifmt_ctx_a = avformat_alloc_context();
-	unsigned char *iobuffer_a = (unsigned char *)av_malloc(IO_BUFFER_SIZE);
-	AVIOContext *avio_a = avio_alloc_context(iobuffer_a, IO_BUFFER_SIZE, 0, NULL, fill_iobuffer_a, NULL, NULL);
-	ifmt_ctx_a->pb = avio_a;
-
-
-	ifmt_v = av_find_input_format("flv");
-	if ((ret = avformat_open_input(&ifmt_ctx_v, "", ifmt_v, NULL)) < 0) {
-		printf("Could not open input file.");
-
+	ret = open_input_file(&_inVideoCfg, fp_open_v, "", fill_iobuffer_v);
+	if (ret != 0){
 		goto end;
 	}
-
-	if ((ret = avformat_find_stream_info(ifmt_ctx_v, 0)) < 0) {
-		printf("Failed to retrieve input stream information");
-
+	ret = open_input_file(&_inAudioCfg, fp_open_a, "nothing", fill_iobuffer_a);
+	if (ret != 0){
 		goto end;
 	}
-	printf("===========Input Information==========\n");
-	av_dump_format(ifmt_ctx_v, 0, in_filename_v.c_str(), 0);
-	printf("======================================\n");
-
-
-
-	ifmt_a = av_find_input_format("flv");
-	if ((ret = avformat_open_input(&ifmt_ctx_a, "nothing", ifmt_a, NULL)) < 0) {
-		printf("Could not open input file.");
-
-		bHasAudio = -1;
-		//goto end;
-	}
-	if (bHasAudio == 0)
-	{
-		if ((ret = avformat_find_stream_info(ifmt_ctx_a, 0)) < 0) {
-			printf("Failed to retrieve input stream information");
-
-			bHasAudio = -1;
-			//goto end;
-		}
-		printf("===========Input Information==========\n");
-		av_dump_format(ifmt_ctx_a, 0, in_filename_a.c_str(), 0);
-		printf("======================================\n");
-	}
-
-
-	avformat_alloc_output_context2(&ofmt_ctx, NULL, NULL, out_filename.c_str());
-	if (!ofmt_ctx) {
-		printf("Could not create output context\n");
-
-		ret = AVERROR_UNKNOWN;
+	ret = open_output_file(&_outputCfg, &_inVideoCfg, &_inAudioCfg);
+	if (ret != 0){
 		goto end;
-	}
-	ofmt = ofmt_ctx->oformat;
-
-	for (int i = 0; i < ifmt_ctx_v->nb_streams; i++) {
-		//Create output AVStream according to input AVStream
-		if (ifmt_ctx_v->streams[i]->codec->codec_type == AVMEDIA_TYPE_VIDEO){
-			AVStream *in_stream = ifmt_ctx_v->streams[i];
-			AVStream *out_stream = avformat_new_stream(ofmt_ctx, in_stream->codec->codec);
-			videoindex_v = i;
-			if (!out_stream) {
-				printf("Failed allocating output stream\n");
-
-				ret = AVERROR_UNKNOWN;
-				goto end;
-			}
-			videoindex_out = out_stream->index;
-			//Copy the settings of AVCodecContext
-			if (avcodec_copy_context(out_stream->codec, in_stream->codec) < 0) {
-				printf("Failed to copy context from input to output stream codec context\n");
-
-				goto end;
-			}
-			out_stream->codec->codec_tag = 0;
-			if (ofmt_ctx->oformat->flags & AVFMT_GLOBALHEADER)
-				out_stream->codec->flags |= CODEC_FLAG_GLOBAL_HEADER;
-			break;
-		}
-	}
-
-	if (bHasAudio == 0)
-	{
-		for (int i = 0; i < ifmt_ctx_a->nb_streams; i++) {
-			//Create output AVStream according to input AVStream
-			if (ifmt_ctx_a->streams[i]->codec->codec_type == AVMEDIA_TYPE_AUDIO){
-				AVStream *in_stream = ifmt_ctx_a->streams[i];
-				AVStream *out_stream = avformat_new_stream(ofmt_ctx, in_stream->codec->codec);
-				audioindex_a = i;
-				if (!out_stream) {
-					printf("Failed allocating output stream\n");
-					ret = AVERROR_UNKNOWN;
-					goto end;
-				}
-				audioindex_out = out_stream->index;
-				//Copy the settings of AVCodecContext
-				if (avcodec_copy_context(out_stream->codec, in_stream->codec) < 0) {
-					printf("Failed to copy context from input to output stream codec context\n");
-					goto end;
-				}
-				out_stream->codec->codec_tag = 0;
-				if (ofmt_ctx->oformat->flags & AVFMT_GLOBALHEADER)
-					out_stream->codec->flags |= CODEC_FLAG_GLOBAL_HEADER;
-
-				break;
-			}
-		}
-
-	}
-
-	printf("==========Output Information==========\n");
-	av_dump_format(ofmt_ctx, 0, out_filename.c_str(), 1);
-	printf("======================================\n");
-	//Open output file
-	if (!(ofmt->flags & AVFMT_NOFILE)) {
-		if (avio_open(&ofmt_ctx->pb, out_filename.c_str(), AVIO_FLAG_WRITE) < 0) {
-			printf("Could not open output file '%s'", out_filename.c_str());
-
-			goto end;
-		}
 	}
 	
+
 	return 0;
 end:
-	cleanup();
-	return -1;
+	return ret;
 }
 
 int mp4Writer::cleanup()
 {
-	int ret;
-	avformat_close_input(&ifmt_ctx_v);
-	avformat_close_input(&ifmt_ctx_a);
+	if (_inVideoCfg.ifmt_ctx){
+		avformat_close_input(&_inVideoCfg.ifmt_ctx);
+	}
+	if (_inAudioCfg.ifmt_ctx){
+		avformat_close_input(&_inAudioCfg.ifmt_ctx);
+	}
 	/* close output */
-	if (ofmt_ctx && !(ofmt->flags & AVFMT_NOFILE))
-		avio_close(ofmt_ctx->pb);
-	avformat_free_context(ofmt_ctx);
+	if (_outputCfg.ofmt_ctx && !(_outputCfg.ofmt->flags & AVFMT_NOFILE))
+		avio_close(_outputCfg.ofmt_ctx->pb);
+	if (_outputCfg.ofmt_ctx){
+		avformat_free_context(_outputCfg.ofmt_ctx);
+	}
 
 	return 0;
 }
 
 int mp4Writer::writeMp4(Config &cfg)
 {
-	in_filename_v = cfg._inputFile;
-	in_filename_a = cfg._inputFile;
-	out_filename = cfg._outputFile;
+	int ret = 0;
+	_inVideoCfg.filename = cfg._inputFile;
+	_inAudioCfg.filename = cfg._inputFile;
+	_outputCfg.filename = cfg._outputFile;
 
-	if (init() != 0)
-		return -1;
+	ret = init();
+	if (ret != 0){
+		cleanup();
+		return ret;
+	}
 
-	int64_t cur_pts_v=0;
-	int64_t cur_pts_a=0;
-	int frame_index=0;
+	int64_t cur_pts_v = 0;
+	int64_t cur_pts_a = 0;
+	int frame_index = 0;
 	AVPacket pkt;
-	
+
 	//Write file header
-	if (avformat_write_header(ofmt_ctx, NULL) < 0) {
-		printf("Error occurred when opening output file\n");
+	if (avformat_write_header(_outputCfg.ofmt_ctx, NULL) < 0) {
+		fprintf(stderr, "[failed] Error occurred when opening output file\n");
 		goto end;
 	}
 
@@ -246,52 +263,17 @@ int mp4Writer::writeMp4(Config &cfg)
 		AVStream *in_stream, *out_stream;
 
 		//Get an AVPacket
-		if (bHasAudio != 0)
 		{
-			ifmt_ctx = ifmt_ctx_v;
-			stream_index = videoindex_out;
-
-			if (av_read_frame(ifmt_ctx, &pkt) >= 0){
-				do{
-					in_stream = ifmt_ctx->streams[pkt.stream_index];
-					out_stream = ofmt_ctx->streams[stream_index];
-
-					if (pkt.stream_index == videoindex_v){
-						//FIX：No PTS (Example: Raw H.264)
-						//Simple Write PTS
-						if (pkt.pts == AV_NOPTS_VALUE){
-							//Write PTS
-							AVRational time_base1 = in_stream->time_base;
-							//Duration between 2 frames (μs)
-							int64_t calc_duration = (double)AV_TIME_BASE / av_q2d(in_stream->r_frame_rate);
-							//Parameters
-							pkt.pts = (double)(frame_index*calc_duration) / (double)(av_q2d(time_base1)*AV_TIME_BASE);
-							pkt.dts = pkt.pts;
-							pkt.duration = (double)calc_duration / (double)(av_q2d(time_base1)*AV_TIME_BASE);
-							frame_index++;
-						}
-						cur_pts_v = pkt.pts;
-						nal_parser(&pkt);
-						break;
-					}
-				} while (av_read_frame(ifmt_ctx, &pkt) >= 0);
-			}
-			else{
-				break;
-			}
-		}
-		else
-		{
-			if (av_compare_ts(cur_pts_v, ifmt_ctx_v->streams[videoindex_v]->time_base, cur_pts_a, ifmt_ctx_a->streams[audioindex_a]->time_base) <= 0){
-				ifmt_ctx = ifmt_ctx_v;
-				stream_index = videoindex_out;
+			if (av_compare_ts(cur_pts_v, _inVideoCfg.ifmt_ctx->streams[_inVideoCfg.index]->time_base, cur_pts_a, _inAudioCfg.ifmt_ctx->streams[_inAudioCfg.index]->time_base) <= 0){
+				ifmt_ctx = _inVideoCfg.ifmt_ctx;
+				stream_index = _outputCfg.indexVideo;
 
 				if (av_read_frame(ifmt_ctx, &pkt) >= 0){
 					do{
 						in_stream = ifmt_ctx->streams[pkt.stream_index];
-						out_stream = ofmt_ctx->streams[stream_index];
+						out_stream = _outputCfg.ofmt_ctx->streams[stream_index];
 
-						if (pkt.stream_index == videoindex_v){
+						if (pkt.stream_index == _inVideoCfg.index){
 							//FIX：No PTS (Example: Raw H.264)
 							//Simple Write PTS
 							if (pkt.pts == AV_NOPTS_VALUE){
@@ -309,7 +291,7 @@ int mp4Writer::writeMp4(Config &cfg)
 							cur_pts_v = pkt.pts;
 
 							nal_parser(&pkt);
-							
+
 							break;
 						}
 					} while (av_read_frame(ifmt_ctx, &pkt) >= 0);
@@ -319,13 +301,13 @@ int mp4Writer::writeMp4(Config &cfg)
 				}
 			}
 			else{
-				ifmt_ctx = ifmt_ctx_a;
-				stream_index = audioindex_out;
+				ifmt_ctx = _inAudioCfg.ifmt_ctx;
+				stream_index = _outputCfg.indexAudio;
 				if (av_read_frame(ifmt_ctx, &pkt) >= 0){
 					do{
 						in_stream = ifmt_ctx->streams[pkt.stream_index];
-						out_stream = ofmt_ctx->streams[stream_index];
-						if (pkt.stream_index == audioindex_a){
+						out_stream = _outputCfg.ofmt_ctx->streams[stream_index];
+						if (pkt.stream_index == _inAudioCfg.index){
 							//FIX：No PTS
 							//Simple Write PTS
 							if (pkt.pts == AV_NOPTS_VALUE){
@@ -367,15 +349,15 @@ int mp4Writer::writeMp4(Config &cfg)
 
 		//printf("Write 1 Packet. size:%5d\tpts:%lld\n", pkt.size, pkt.pts);
 		//Write
-		if (av_interleaved_write_frame(ofmt_ctx, &pkt) < 0) {
-			printf("Error muxing packet\n");
+		if (av_interleaved_write_frame(_outputCfg.ofmt_ctx, &pkt) < 0) {
+			fprintf(stderr, "[failed] Error muxing packet\n");
 			//break;
 		}
 
 		av_free_packet(&pkt);
 	}
 	//Write file trailer
-	av_write_trailer(ofmt_ctx);
+	av_write_trailer(_outputCfg.ofmt_ctx);
 
 #if USE_H264BSF
 	av_bitstream_filter_close(h264bsfc);
@@ -384,9 +366,10 @@ int mp4Writer::writeMp4(Config &cfg)
 	av_bitstream_filter_close(aacbsfc);
 #endif
 
+	return 0;
 end:
 	cleanup();
-	return 0;
+	return ret;
 }
 
 bool mp4Writer::is_delete(unsigned char type)
@@ -402,7 +385,8 @@ bool mp4Writer::is_delete(unsigned char type)
 		if (seiFlag == 0){
 			seiFlag = 1;
 			return false;
-		}else{
+		}
+		else{
 			return true;
 		}
 	}
@@ -477,10 +461,10 @@ int mp4Writer::nal_parser_sub(unsigned char *pNal, nal_s &node)
 	// 没有找到 0x00000001的情况，认为只包含一个NalU
 	if (lSons.size() == 0){
 		nal_s ns;
-		ns.pos = node.pos+4;
+		ns.pos = node.pos + 4;
 		ns.type = pNal[4] & 0x1f;
 		ns.bHasStartCode = false;
-		ns.size = node.size-4;
+		ns.size = node.size - 4;
 		vSons.push_back(ns);
 		return 0;
 	}
@@ -502,14 +486,14 @@ int mp4Writer::nal_parser_sub(unsigned char *pNal, nal_s &node)
 
 	// 只有一个nalu
 	if (vSons.size() == 1){
-		vSons[0].size = node.size-4;
+		vSons[0].size = node.size - 4;
 		vSons[0].pos += node.pos;
 		return 0;
 	}
 
 	// 生成size信息
 	int i;
-	for (i = 0; i < vSons.size()-1; i++){
+	for (i = 0; i < vSons.size() - 1; i++){
 		vSons[i].size = vSons[i + 1].pos - vSons[i].pos;
 	}
 	vSons[i].size = node.size - vSons[i].pos;
@@ -530,18 +514,18 @@ int mp4Writer::nal_parser(AVPacket *org)
 	std::vector<nal_s> vecNalInfo;
 	unsigned char *pNal = org->data;
 	for (int i = 0; i < org->size;){
-			nal_s ns = {0};
-			ns.pos = i;
-			ns.type = -1;
-			ns.size = get_data_size(&pNal[ns.pos]);
-			ns.size += 4;
-			
-			nal_parser_sub(&pNal[i], ns);
-			vecNalInfo.push_back(ns);
-			
-			i += ns.size;
+		nal_s ns = { 0 };
+		ns.pos = i;
+		ns.type = -1;
+		ns.size = get_data_size(&pNal[ns.pos]);
+		ns.size += 4;
+
+		nal_parser_sub(&pNal[i], ns);
+		vecNalInfo.push_back(ns);
+
+		i += ns.size;
 	}
-	
+
 	// 遍历处理
 	memcpy(_buffer, org->data, org->size);
 	int curPos = 0;
@@ -550,27 +534,30 @@ int mp4Writer::nal_parser(AVPacket *org)
 
 		// 拷贝
 		std::vector<nal_s> &vSons = vecNalInfo[i].vecSons;
-		int naluTotalSize = vecNalInfo[i].size-4;
+		int naluTotalSize = vecNalInfo[i].size - 4;
 		int curPktuFirstPos;
 		bool isWriteFirst = false;
 		for (int sIdx = 0; sIdx < vSons.size(); sIdx++){
 			nal_s &ns = vSons[sIdx];
-			if (is_delete(ns.type)==true){
+			if (is_delete(ns.type) == true){
 				naluTotalSize -= ns.size;
-			}else{
+			}
+			else{
 				if (isWriteFirst == true){
 					memcpy(&org->data[curPos], &_buffer[ns.pos], ns.size);
 					curPos += ns.size;
-				}else{ //bIsFirst==true
+				}
+				else{ //bIsFirst==true
 					isWriteFirst = true;
 					if (ns.bHasStartCode == false){
 						curPktuFirstPos = curPos;
-						memcpy(&org->data[curPos+4], &_buffer[ns.pos], ns.size);
+						memcpy(&org->data[curPos + 4], &_buffer[ns.pos], ns.size);
 						curPos += ns.size;
 						curPos += 4;
-					} else{ //bIsFirst==true && bHasStartCode==true
+					}
+					else{ //bIsFirst==true && bHasStartCode==true
 						curPktuFirstPos = curPos;
-						memcpy(&org->data[curPos+4], &_buffer[ns.pos+4], ns.size-4);
+						memcpy(&org->data[curPos + 4], &_buffer[ns.pos + 4], ns.size - 4);
 						naluTotalSize -= 4;
 					}
 				}

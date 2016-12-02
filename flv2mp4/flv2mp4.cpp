@@ -30,6 +30,12 @@ int main(int argc, char *argv[])
 {
 	Config cfg;
 	
+	if (argc == 1){
+		printf("version : 0.1.1\n");
+		printf("usage : flv2mp4 sample.flv sample.mp4\n");
+		return 0;
+	}
+
 	if (argc!=3)
 	{
 		printf("input param error\n");
@@ -40,7 +46,7 @@ int main(int argc, char *argv[])
 	cfg._outputFile = argv[2];
 
 	mp4Writer mw;
-	mw.writeMp4(cfg);
+	int ret = mw.writeMp4(cfg);
 
-	return 0;
+	return ret;
 }
