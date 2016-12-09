@@ -254,6 +254,7 @@ int mp4Writer::writeMp4(Config &cfg)
 	//Write file header
 	if (avformat_write_header(_outputCfg.ofmt_ctx, NULL) < 0) {
 		fprintf(stderr, "[failed] Error occurred when opening output file\n");
+		ret = ErrorNo_Unknow;
 		goto end;
 	}
 
