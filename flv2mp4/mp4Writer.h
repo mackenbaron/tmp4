@@ -29,7 +29,6 @@ struct Config{
 typedef struct nal_s{
 	unsigned char type;
 	bool bHasStartCode;
-	int posData;
 	int posHead;
 	int size;
 	std::vector<nal_s> vecSons;

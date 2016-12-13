@@ -447,12 +447,12 @@ int mp4Writer::nal_parser_sub(unsigned char *pNal, nal_s &node)
 {
 	std::list<nal_s> lSons;
 	std::vector<nal_s> &vSons = node.vecSons;
-
+	int size = node.size + 4;
 	// 找到所有的0x00000001
-	for (int i = 0; i < node.size; i++){
+	for (int i = 0; i < size; i++){
 		if (pNal[i] == 0x00 && pNal[i + 1] == 0x00 && pNal[i + 2] == 0x00 && pNal[i + 3] == 0x01){
 			nal_s ns = { 0 };
-			ns.posData = i;
+			ns.posHead = i;
 			ns.type = pNal[i + 4] & 0x1f;
 			ns.bHasStartCode = true;
 			lSons.push_back(ns);
@@ -462,19 +462,21 @@ int mp4Writer::nal_parser_sub(unsigned char *pNal, nal_s &node)
 	// 没有找到 0x00000001的情况，认为只包含一个NalU
 	if (lSons.size() == 0){
 		nal_s ns;
-		ns.posData = node.posData;
-		ns.type = pNal[0] & 0x1f;
+		ns.posHead = node.posHead;
+		ns.type = pNal[4] & 0x1f;
 		ns.bHasStartCode = false;
-		ns.size = node.size;
+		ns.size = size - 4;
 		vSons.push_back(ns);
 		return 0;
 	}
 
-	// 包含有0x00000001，但首个NalU没有0x00000001，也就是多slice的情况
-	if (lSons.front().posData > 4){
+	// 处理第一个NalU
+	if (lSons.front().posHead == 4){ // 第一个NalU包含0x00000001,调整位置
+		lSons.front().posHead = 0;
+	}else{ // 包含有0x00000001，但首个NalU没有0x00000001，也就是多slice的情况
 		nal_s ns;
-		ns.posData = 0;
-		ns.type = pNal[0] & 0x1f;
+		ns.posHead = 0;
+		ns.type = pNal[4] & 0x1f;
 		ns.bHasStartCode = false;
 		lSons.push_front(ns);
 	}
@@ -484,24 +486,29 @@ int mp4Writer::nal_parser_sub(unsigned char *pNal, nal_s &node)
 	for (; iter != lSons.end(); iter++){
 		vSons.push_back(*iter);
 	}
-
+#if 0
 	// 只有一个nalu
 	if (vSons.size() == 1){
-		vSons[0].size = node.size;
-		vSons[0].posData += node.posData;
+		vSons[0].size = size - 4;
+		vSons[0].posHead += node.posHead;
 		return 0;
 	}
-
+#endif
 	// 生成size信息
 	int i;
 	for (i = 0; i < vSons.size() - 1; i++){
-		vSons[i].size = vSons[i + 1].posData - vSons[i].posData;
+		vSons[i].size = vSons[i + 1].posHead - vSons[i].posHead - 4;
 	}
-	vSons[i].size = node.size - vSons[i].posData;
+	vSons[i].size = size - vSons[i].posHead - 4;
 
 	// 生成绝对位置
 	for (i = 0; i < vSons.size(); i++){
-		vSons[i].posData += node.posData;
+		vSons[i].posHead += node.posHead;
+	}
+
+	// 统一去除startcode，除了第一个
+	for (i = 1; i < vSons.size(); i++){
+		vSons[i].bHasStartCode = false;
 	}
 
 	return 0;
@@ -509,6 +516,7 @@ int mp4Writer::nal_parser_sub(unsigned char *pNal, nal_s &node)
 
 int mp4Writer::nal_parser(AVPacket *org)
 {
+	//return 0;
 	if (org->data == NULL || org->size <= 0)
 		return 0;
 	static int iii = 0;
@@ -518,13 +526,12 @@ int mp4Writer::nal_parser(AVPacket *org)
 	for (int i = 0; i < org->size;){
 		nal_s ns = { 0 };
 		ns.posHead = i;
-		ns.posData = i + 4;
 		ns.type = -1;
 		ns.size = get_data_size(&pNal[ns.posHead]);
 
 		if (ns.size > org->size)
 			return 0;
-		nal_parser_sub(&pNal[ns.posData], ns);
+		nal_parser_sub(&pNal[ns.posHead], ns);
 		vecNalInfo.push_back(ns);
 
 		i += 4;
@@ -560,40 +567,23 @@ int mp4Writer::nal_parser(AVPacket *org)
 		for (int sIdx = 0; sIdx < vSons.size(); sIdx++){
 			nal_s &ns = vSons[sIdx];
 			if (is_delete(ns.type) == true){
-				naluTotalSize -= ns.size;
-				delCount++;
-			}
-			else{
-				if (isWriteFirst == true){
-					memcpy(&org->data[curPos], &_buffer[ns.posData], ns.size);
+
+			}else{
+				if (ns.bHasStartCode == false){
+					memcpy(&org->data[curPos + 4], &_buffer[ns.posHead+4], ns.size);
+					set_data_size(&org->data[curPos], ns.size);
 					curPos += ns.size;
+					curPos += 4;
+					totalSize = totalSize + ns.size + 4;
 				}
-				else{ //bIsFirst==true
-					isWriteFirst = true;
-					if (ns.bHasStartCode == false){
-						curPktuFirstPos = curPos;
-						memcpy(&org->data[curPos + 4], &_buffer[ns.posData], ns.size);
-						curPos += ns.size;
-						curPos += 4;
-					}
-					else{ //bIsFirst==true && bHasStartCode==true
-						curPktuFirstPos = curPos;
-						memcpy(&org->data[curPos + 4], &_buffer[ns.posData + 4], ns.size - 4);
-						naluTotalSize -= 4;
-						curPos += ns.size;
-					}
+				else{ //bHasStartCode==true
+					memcpy(&org->data[curPos + 4], &_buffer[ns.posHead + 8], ns.size - 4);
+					set_data_size(&org->data[curPos], ns.size-4);
+					curPos += ns.size;
+					totalSize = totalSize + ns.size;
 				}
 			}
 		}
-		// 重新生成头大小
-		if (delCount != vSons.size()){
-			set_data_size(&org->data[curPktuFirstPos], naluTotalSize);
-			naluTotalSize += 4;
-		}
-		else{
-			naluTotalSize = 0;
-		}
-		totalSize += naluTotalSize;
 	}
 	org->size = totalSize;
 	//printf("cur size:%d\n\n", org->size);
