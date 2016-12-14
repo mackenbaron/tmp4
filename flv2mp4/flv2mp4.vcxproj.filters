@@ -21,9 +21,15 @@
     <ClCompile Include="mp4Writer.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
+    <ClCompile Include="TS-adjust.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="mp4Writer.h">
+      <Filter>源文件</Filter>
+    </ClInclude>
+    <ClInclude Include="TS-adjust.h">
       <Filter>源文件</Filter>
     </ClInclude>
   </ItemGroup>

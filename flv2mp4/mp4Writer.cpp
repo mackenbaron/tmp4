@@ -4,6 +4,10 @@
 #include <string>
 #include <vector>
 #include <list>
+#include <iostream>
+#include "TS-adjust.h"
+
+using namespace std;
 
 FILE *fp_open_v;
 FILE *fp_open_a;
@@ -250,6 +254,7 @@ int mp4Writer::writeMp4(Config &cfg)
 	int64_t cur_pts_a = 0;
 	int frame_index = 0;
 	AVPacket pkt;
+	CTSAdjust *p = new CTSAdjust();
 
 	//Write file header
 	if (avformat_write_header(_outputCfg.ofmt_ctx, NULL) < 0) {
@@ -340,6 +345,23 @@ int mp4Writer::writeMp4(Config &cfg)
 #if  USE_AACBSF
 		av_bitstream_filter_filter(aacbsfc, out_stream->codec, NULL, &pkt.data, &pkt.size, pkt.data, pkt.size, 0);
 #endif
+
+		if (pkt.stream_index == _inVideoCfg.index){
+			cout << "v : before " << pkt.pts << " " << pkt.dts;
+			int64_t tmp = pkt.pts;
+			pkt.pts = p->AdjustV(pkt.pts);
+			pkt.dts = pkt.dts - (tmp - pkt.pts);
+			//cur_pts_v = pkt.pts;
+			cout << " after " << pkt.pts << " " << pkt.dts << endl;
+		}
+		else{
+			cout << "a : before " << pkt.pts << " " << pkt.dts;
+			int64_t tmp = pkt.pts;
+			pkt.pts = p->AdjustA(pkt.pts);
+			pkt.dts = pkt.dts - (tmp - pkt.pts);
+			//cur_pts_a = pkt.pts;
+			cout << " after " << pkt.pts << " " << pkt.dts << endl;
+		}
 
 		//Convert PTS/DTS
 		pkt.pts = av_rescale_q_rnd(pkt.pts, in_stream->time_base, out_stream->time_base, (AVRounding)(AV_ROUND_NEAR_INF | AV_ROUND_PASS_MINMAX));
