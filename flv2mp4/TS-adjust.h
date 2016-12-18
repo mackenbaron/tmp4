@@ -20,7 +20,7 @@ public:
 private:
 	EInt64 _vts_base, _ats_base;
 	EInt64 _vts_last, _ats_last;
-
+	bool _bFirstV, _bFirstA;
 };
 
 #endif // TS_ADJUST_H

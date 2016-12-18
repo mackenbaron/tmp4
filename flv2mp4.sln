@@ -5,6 +5,8 @@ VisualStudioVersion = 12.0.30501.0
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "flv2mp4", "flv2mp4\flv2mp4.vcxproj", "{7F4C4DBC-EF03-43A5-AB0F-EF5581904FF8}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "test", "test\test.vcxproj", "{558DBA47-7344-4749-89AB-1717008579FC}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Win32 = Debug|Win32
@@ -15,6 +17,10 @@ Global
 		{7F4C4DBC-EF03-43A5-AB0F-EF5581904FF8}.Debug|Win32.Build.0 = Debug|Win32
 		{7F4C4DBC-EF03-43A5-AB0F-EF5581904FF8}.Release|Win32.ActiveCfg = Release|Win32
 		{7F4C4DBC-EF03-43A5-AB0F-EF5581904FF8}.Release|Win32.Build.0 = Release|Win32
+		{558DBA47-7344-4749-89AB-1717008579FC}.Debug|Win32.ActiveCfg = Debug|Win32
+		{558DBA47-7344-4749-89AB-1717008579FC}.Debug|Win32.Build.0 = Debug|Win32
+		{558DBA47-7344-4749-89AB-1717008579FC}.Release|Win32.ActiveCfg = Release|Win32
+		{558DBA47-7344-4749-89AB-1717008579FC}.Release|Win32.Build.0 = Release|Win32
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

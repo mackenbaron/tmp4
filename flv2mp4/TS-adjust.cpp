@@ -1,6 +1,7 @@
 #include "TS-adjust.h"
 
 #define DIFF_THRESHOLD 1000
+#define DIFF_THRESHOLD_F -1000
 
 CTSAdjust::CTSAdjust()
 {
@@ -20,7 +21,7 @@ CTSAdjust::~CTSAdjust()
 EInt64 CTSAdjust::AdjustV(EInt64 vts)
 {
 	EInt64 diff = vts - _vts_last;
-	if (diff > 0 && diff < DIFF_THRESHOLD)
+	if (diff > DIFF_THRESHOLD_F && diff < DIFF_THRESHOLD)
 	{
 		_vts_last = vts;
 		_vts_base += diff;
@@ -38,7 +39,7 @@ EInt64 CTSAdjust::AdjustV(EInt64 vts)
 EInt64 CTSAdjust::AdjustA(EInt64 ats)
 {
 	EInt64 diff = ats - _ats_last;
-	if (diff > 0 && diff < DIFF_THRESHOLD)
+	if (diff > DIFF_THRESHOLD_F && diff < DIFF_THRESHOLD)
 	{
 		_ats_last = ats;
 		_ats_base += diff;

@@ -250,11 +250,9 @@ int mp4Writer::writeMp4(Config &cfg)
 		return ret;
 	}
 
-	int64_t cur_pts_v = 0;
-	int64_t cur_pts_a = 0;
+	int64_t cur_pts_v = -1;
+	int64_t cur_pts_a = -1;
 	int frame_index = 0;
-	AVPacket pkt;
-	CTSAdjust *p = new CTSAdjust();
 
 	//Write file header
 	if (avformat_write_header(_outputCfg.ofmt_ctx, NULL) < 0) {
@@ -263,105 +261,42 @@ int mp4Writer::writeMp4(Config &cfg)
 		goto end;
 	}
 
-	while (1) {
-		AVFormatContext *ifmt_ctx;
+#if 1
+	AVPacket pkt;
+	CTSAdjust *p = new CTSAdjust();
+	AVFormatContext *ifmt_ctx;
+
+	ifmt_ctx = _inVideoCfg.ifmt_ctx;
+	while (1){
+		
 		int stream_index = 0;
 		AVStream *in_stream, *out_stream;
 
-		//Get an AVPacket
-		{
-			if (av_compare_ts(cur_pts_v, _inVideoCfg.ifmt_ctx->streams[_inVideoCfg.index]->time_base, cur_pts_a, _inAudioCfg.ifmt_ctx->streams[_inAudioCfg.index]->time_base) <= 0){
-				ifmt_ctx = _inVideoCfg.ifmt_ctx;
-				stream_index = _outputCfg.indexVideo;
-
-				if (av_read_frame(ifmt_ctx, &pkt) >= 0){
-					do{
-						in_stream = ifmt_ctx->streams[pkt.stream_index];
-						out_stream = _outputCfg.ofmt_ctx->streams[stream_index];
-
-						if (pkt.stream_index == _inVideoCfg.index){
-							//FIX£ºNo PTS (Example: Raw H.264)
-							//Simple Write PTS
-							if (pkt.pts == AV_NOPTS_VALUE){
-								//Write PTS
-								AVRational time_base1 = in_stream->time_base;
-								//Duration between 2 frames (us)
-								int64_t calc_duration = (double)AV_TIME_BASE / 16;// av_q2d(in_stream->r_frame_rate);
-								//Parameters
-								pkt.pts = (double)(frame_index*calc_duration) / (double)(av_q2d(time_base1)*AV_TIME_BASE);
-								pkt.dts = pkt.pts;
-								pkt.duration = (double)calc_duration / (double)(av_q2d(time_base1)*AV_TIME_BASE);
-								frame_index++;
-							}
-
-							cur_pts_v = pkt.pts;
-
-							nal_parser(&pkt);
-
-							break;
-						}
-					} while (av_read_frame(ifmt_ctx, &pkt) >= 0);
-				}
-				else{
-					break;
-				}
-			}
-			else{
-				ifmt_ctx = _inAudioCfg.ifmt_ctx;
-				stream_index = _outputCfg.indexAudio;
-				if (av_read_frame(ifmt_ctx, &pkt) >= 0){
-					do{
-						in_stream = ifmt_ctx->streams[pkt.stream_index];
-						out_stream = _outputCfg.ofmt_ctx->streams[stream_index];
-						if (pkt.stream_index == _inAudioCfg.index){
-							//FIX£ºNo PTS
-							//Simple Write PTS
-							if (pkt.pts == AV_NOPTS_VALUE){
-								//Write PTS
-								AVRational time_base1 = in_stream->time_base;
-								//Duration between 2 frames (us)
-								int64_t calc_duration = (double)AV_TIME_BASE / av_q2d(in_stream->r_frame_rate);
-								//Parameters
-								pkt.pts = (double)(frame_index*calc_duration) / (double)(av_q2d(time_base1)*AV_TIME_BASE);
-								pkt.dts = pkt.pts;
-								pkt.duration = (double)calc_duration / (double)(av_q2d(time_base1)*AV_TIME_BASE);
-								frame_index++;
-							}
-							cur_pts_a = pkt.pts;
-							break;
-						}
-					} while (av_read_frame(ifmt_ctx, &pkt) >= 0);
-				}
-				else{
-					break;
-				}
-			}
-		}
-
-		//FIX:Bitstream Filter
-#if USE_H264BSF
-		av_bitstream_filter_filter(h264bsfc, in_stream->codec, NULL, &pkt.data, &pkt.size, pkt.data, pkt.size, 0);
-#endif
-#if  USE_AACBSF
-		av_bitstream_filter_filter(aacbsfc, out_stream->codec, NULL, &pkt.data, &pkt.size, pkt.data, pkt.size, 0);
-#endif
+		if (av_read_frame(ifmt_ctx, &pkt) < 0)
+			break;
 
 		if (pkt.stream_index == _inVideoCfg.index){
-			cout << "v : before " << pkt.pts << " " << pkt.dts;
+			stream_index = _outputCfg.indexVideo;
+			in_stream = ifmt_ctx->streams[pkt.stream_index];
+			out_stream = _outputCfg.ofmt_ctx->streams[stream_index];
+			cout << "video : " << pkt.pts << " "<<pkt.dts<<" ";
 			int64_t tmp = pkt.pts;
-			pkt.pts = p->AdjustV(pkt.pts);
+			pkt.pts =  p->AdjustV(pkt.pts);
 			pkt.dts = pkt.dts - (tmp - pkt.pts);
-			//cur_pts_v = pkt.pts;
-			cout << " after " << pkt.pts << " " << pkt.dts << endl;
-		}
-		else{
-			cout << "a : before " << pkt.pts << " " << pkt.dts;
+			cout << pkt.pts <<" " <<pkt.dts<<endl;
+			nal_parser(&pkt);
+		}else{
+			stream_index = _outputCfg.indexAudio;
+			in_stream = ifmt_ctx->streams[pkt.stream_index];
+			out_stream = _outputCfg.ofmt_ctx->streams[stream_index];
+			cout << "audio : " << pkt.pts << " " << pkt.dts << " ";
 			int64_t tmp = pkt.pts;
 			pkt.pts = p->AdjustA(pkt.pts);
 			pkt.dts = pkt.dts - (tmp - pkt.pts);
-			//cur_pts_a = pkt.pts;
-			cout << " after " << pkt.pts << " " << pkt.dts << endl;
+			cout << pkt.pts << " " << pkt.dts << endl;
 		}
+
+		in_stream = ifmt_ctx->streams[pkt.stream_index];
 
 		//Convert PTS/DTS
 		pkt.pts = av_rescale_q_rnd(pkt.pts, in_stream->time_base, out_stream->time_base, (AVRounding)(AV_ROUND_NEAR_INF | AV_ROUND_PASS_MINMAX));
@@ -373,12 +308,153 @@ int mp4Writer::writeMp4(Config &cfg)
 		//printf("Write 1 Packet. size:%5d\tpts:%lld\n", pkt.size, pkt.pts);
 		//Write
 		if (av_interleaved_write_frame(_outputCfg.ofmt_ctx, &pkt) < 0) {
-			fprintf(stderr, "[failed] Error muxing packet\n");
+			fprintf(stderr, "Error muxing packet\n");
 			//break;
 		}
 
 		av_free_packet(&pkt);
 	}
+#else
+	AVPacket pktV, pktA;
+	AVPacket *ppkt = NULL;
+	bool vFlag = false;
+	bool aFlag = false;
+	bool vOver = false;
+	bool aOver = false;
+	int noSel = -1;
+	CTSAdjust *p = new CTSAdjust();
+	//_inVideoCfg.ifmt_ctx->streams[0]->start_time = 0;
+	//_inAudioCfg.ifmt_ctx->streams[1]->start_time = 0;
+
+	while (1){
+		AVFormatContext *ifmt_ctx;
+		int stream_index = 0;
+		AVStream *in_stream, *out_stream;
+		
+		if (vFlag == false && !vOver){
+			vFlag = true;
+			ifmt_ctx = _inVideoCfg.ifmt_ctx;
+			stream_index = _outputCfg.indexVideo;
+
+			if (av_read_frame(ifmt_ctx, &pktV) >= 0){
+				do{
+					in_stream = ifmt_ctx->streams[pktV.stream_index];
+					out_stream = _outputCfg.ofmt_ctx->streams[stream_index];
+
+					if (pktV.stream_index == _inVideoCfg.index){
+						
+						int64_t tmp = pktV.pts;
+						//pktV.pts = p->AdjustV(pktV.pts);
+						//pktV.dts = pktV.dts - (tmp - pktV.pts);
+						cur_pts_v = pktV.pts;
+						nal_parser(&pktV);
+						break;
+					}
+				} while (av_read_frame(ifmt_ctx, &pktV) >= 0);
+			}
+			else{
+				vOver = true;
+				//break;
+			}
+		}
+
+		if (aFlag == false && !aOver){
+			aFlag = true;
+			ifmt_ctx = _inAudioCfg.ifmt_ctx;
+			stream_index = _outputCfg.indexAudio;
+			if (av_read_frame(ifmt_ctx, &pktA) >= 0){
+				do{
+					in_stream = ifmt_ctx->streams[pktA.stream_index];
+					out_stream = _outputCfg.ofmt_ctx->streams[stream_index];
+					if (pktA.stream_index == _inAudioCfg.index){
+						
+						int64_t tmp = pktA.pts;
+						//pktA.pts = p->AdjustA(pktA.pts);
+						//pktA.dts = pktA.dts - (tmp - pktA.pts);
+						cur_pts_a = pktA.pts;
+						break;
+					}
+				} while (av_read_frame(ifmt_ctx, &pktA) >= 0);
+			}
+			else{
+				aOver = true;
+				//break;
+			}
+		}
+
+		if (aOver && vOver)
+			break;
+
+		bool isVideo = false;
+		if (aOver)
+			isVideo = true;
+		else if (vOver)
+			isVideo = false;
+		else if (av_compare_ts(cur_pts_v, _inVideoCfg.ifmt_ctx->streams[_inVideoCfg.index]->time_base, cur_pts_a, _inAudioCfg.ifmt_ctx->streams[_inAudioCfg.index]->time_base) <= 0)
+			isVideo = true;
+		else
+			isVideo = false;
+
+		if (isVideo){
+			noSel = 0;
+			ppkt = &pktV;
+			vFlag = false;
+
+			ifmt_ctx = _inVideoCfg.ifmt_ctx;
+			stream_index = _outputCfg.indexVideo;
+			in_stream = ifmt_ctx->streams[pktV.stream_index];
+			out_stream = _outputCfg.ofmt_ctx->streams[stream_index];
+
+		}else{
+			noSel = 1;
+			ppkt = &pktA;
+			aFlag = false;
+
+			ifmt_ctx = _inAudioCfg.ifmt_ctx;
+			stream_index = _outputCfg.indexAudio;
+			in_stream = ifmt_ctx->streams[pktA.stream_index];
+			out_stream = _outputCfg.ofmt_ctx->streams[stream_index];
+		}
+#if 1
+		if (noSel==0){
+			cout << "v : before " << ppkt->pts << " " << ppkt->dts ;
+			int64_t tmp = ppkt->pts;
+			//ppkt->pts = p->AdjustV(ppkt->pts);
+			//ppkt->dts = ppkt->dts - (tmp - ppkt->pts);
+		}
+		else{
+			cout << "a : before " << ppkt->pts << " " << ppkt->dts ;
+			int64_t tmp = ppkt->pts;
+			//ppkt->pts = p->AdjustA(ppkt->pts);
+			//ppkt->dts = ppkt->dts - (tmp - ppkt->pts);
+		}
+#endif
+		//Convert PTS/DTS
+		ppkt->pts = av_rescale_q_rnd(ppkt->pts, in_stream->time_base, out_stream->time_base, (AVRounding)(AV_ROUND_NEAR_INF | AV_ROUND_PASS_MINMAX));
+		ppkt->dts = av_rescale_q_rnd(ppkt->dts, in_stream->time_base, out_stream->time_base, (AVRounding)(AV_ROUND_NEAR_INF | AV_ROUND_PASS_MINMAX));
+		ppkt->duration = av_rescale_q(ppkt->duration, in_stream->time_base, out_stream->time_base);
+		ppkt->pos = -1;
+		ppkt->stream_index = stream_index;
+
+		if (noSel == 0){
+			cout << " v : after " << ppkt->pts << " " << ppkt->dts << endl;
+			
+		}
+		else{
+			cout << " a : after " << ppkt->pts << " " << ppkt->dts << endl;
+
+		}
+
+		//printf("Write 1 Packet. size:%5d\tpts:%lld\n", pkt.size, pkt.pts);
+		//Write
+		if (av_interleaved_write_frame(_outputCfg.ofmt_ctx, ppkt) < 0) {
+			fprintf(stderr, "Error muxing packet\n");
+			//break;
+		}
+
+		av_free_packet(ppkt);
+	}
+#endif
 	//Write file trailer
 	av_write_trailer(_outputCfg.ofmt_ctx);
 
