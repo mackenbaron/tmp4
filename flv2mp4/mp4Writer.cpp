@@ -230,6 +230,7 @@ int mp4Writer::cleanup()
 
 int mp4Writer::writeMp4(Config &cfg)
 {
+	CTSAdjust *p = new CTSAdjust();
 	int ret = 0;
 	_inputCfg.filename = cfg._inputFile;
 	_outputCfg.filename = cfg._outputFile;
@@ -252,7 +253,6 @@ int mp4Writer::writeMp4(Config &cfg)
 	}
 
 	AVPacket pkt;
-	CTSAdjust *p = new CTSAdjust();
 	AVFormatContext *ifmt_ctx;
 
 	ifmt_ctx = _inputCfg.ifmt_ctx;
