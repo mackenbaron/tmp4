@@ -50,10 +50,10 @@ enum error_no_e{
 
 typedef struct InputCfg_S{
 	std::string filename;
-	//FILE *pFile;
 	AVFormatContext *ifmt_ctx;
 	AVInputFormat *ifmt;
-	int index;
+	int indexVideo;
+	int indexAudio;
 }InputCfg_S;
 
 typedef struct OutputCfg_S{
@@ -76,8 +76,8 @@ private:
 	int init();
 	int open_input_file(InputCfg_S *p, FILE * &pFile, char *url,
 		int(*read_packet)(void *opaque, uint8_t *buf, int buf_size));
-	int open_output_file(OutputCfg_S *p, InputCfg_S *inV, InputCfg_S *inA);
-	int bind_stream(InputCfg_S *in, OutputCfg_S *out, int type, int &index);
+	int open_output_file(OutputCfg_S *p, InputCfg_S *inV);
+	int bind_stream(InputCfg_S *in, OutputCfg_S *out, int type, int &inIndex, int &outIndex);
 	int cleanup();
 	int nal_parser(AVPacket *org);
 	int nal_parser_sub(unsigned char *pNal, nal_s &node);
@@ -87,8 +87,7 @@ private:
 
 private:
 
-	InputCfg_S _inVideoCfg;
-	InputCfg_S _inAudioCfg;
+	InputCfg_S _inputCfg;
 	OutputCfg_S _outputCfg;
 
 	unsigned char *_buffer;
