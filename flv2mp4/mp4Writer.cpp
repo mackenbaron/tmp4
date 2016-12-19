@@ -294,6 +294,8 @@ int mp4Writer::writeMp4(Config &cfg)
 							nal_parser(&pkt);
 
 							break;
+						}else{
+							av_free_packet(&pkt);
 						}
 					} while (av_read_frame(ifmt_ctx, &pkt) >= 0);
 				}
@@ -324,6 +326,8 @@ int mp4Writer::writeMp4(Config &cfg)
 							}
 							cur_pts_a = pkt.pts;
 							break;
+						}else{
+							av_free_packet(&pkt);
 						}
 					} while (av_read_frame(ifmt_ctx, &pkt) >= 0);
 				}
